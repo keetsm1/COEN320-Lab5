@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<trgtproject id="com.qnx.tools.ide.target.core.target">
+    <data>
+        <item id="com.qnx.tools.ide.target">
+            <project>
+                <name value="vm1"/>
+            </project>
+            <connection>
+                <TIMEZONE value="UTC0"/>
+                <RELEASE value="7.1.0"/>
+                <SYSNAME value="QNX"/>
+                <ENDIAN value="le"/>
+                <ARCHITECTURE value="x86_64"/>
+                <CPU value="x86_64"/>
+                <HOSTNAME value="vm1"/>
+                <OS value="nto"/>
+                <MACHINE value="x86pc"/>
+                <HASVERSION value="1"/>
+                <VERSION value="2026/04/10-15:43:20EDT"/>
+                <QCONN_VERSION value="1.4.207944"/>
+                <NUM_SRVCS value="1"/>
+            </connection>
+            <vmOptions value=""/>
+            <qconnport value="8000"/>
+            <qconnostype value="nto"/>
+            <vmArch value="x86_64"/>
+            <vmSDK value="qnx710"/>
+            <qconnhostname value="192.168.56.104"/>
+            <targettmpdir value="/tmp"/>
+            <vmPlatform value="vbox"/>
+            <qconnguid value="135afab5-76d3-4d19-bf50-f87c3d0a9055"/>
+            <targetType value="com.qnx.tools.ide.target.qconn.qnxVMTarget"/>
+        </item>
+    </data>
+</trgtproject>
