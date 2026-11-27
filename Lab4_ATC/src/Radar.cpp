@@ -1,10 +1,7 @@
 #include "Radar.h"
 #include <sys/dispatch.h>
-#include <algorithm>
-#include <cstdio>
 
 #define SHARED_MEMORY_NAME "/gunkeet_tracy_radar_shm"
-
 
 Radar::Radar(uint64_t& tick_counter) : tick_counter_ref(tick_counter), activeBufferIndex(0), timer(1,0), stopThreads(false) {
 	clearSharedMemory(); //For future Use
@@ -191,49 +188,116 @@ void Radar::removePlaneFromAirspace(int planeID) {
 
 
 void Radar::writeToSharedMemory() {
-	const int shm_fd = shm_open(SHARED_MEMORY_NAME, O_CREAT | O_RDWR, 0666);
-	if (shm_fd == -1) {
-		std::perror("shm_open");
+	// COEN320 Lab4_5 Task 2.1
+	/*
+	You need to implement the shared memory writing process here
+	Save SharedMemory structure to shared memory
+	Make sure to use mutex to protect the buffer switching process (e.g., bufferSwitchMutex)
+	To store aircraft data, use inactiveBuffer which is obtained from getActiveBuffer() method
+	Check the code snippet below for reference
+	at the end you need to unmap the shared memory and close the file descriptor
+	e.g., munmap(<SharedMemory object, shared_mem>, SHARED_MEMORY_SIZE) and close(shm_fd)
+
+
+	// Get the active buffer based on the current active index
+    std::vector<msg_plane_info>& activeBuffer = getActiveBuffer();
+    // Get the current timestamp
+    shared_mem->timestamp = tick_counter_ref;
+
+	// Check if activeBuffer is empty and set the flag accordingly
+	if (activeBuffer.empty()) {
+		std::vector<msg_plane_info>& inactiveBuffer = planesInAirspaceData[(activeBufferIndex + 1) % 2];
+		if (!inactiveBuffer.empty()){
+			shared_mem->is_empty.store(false);
+			shared_mem->count = inactiveBuffer.size();
+			std::memcpy(shared_mem->plane_data, inactiveBuffer.data(), inactiveBuffer.size() * sizeof(msg_plane_info));
+			inactiveBuffer.clear();
+		}
+		shared_mem->is_empty.store(true);
+		shared_mem->count = 0;  // No planes
+	} else {
+            shared_mem->is_empty.store(false);
+            shared_mem->count = activeBuffer.size();
+            std::memcpy(shared_mem->plane_data, activeBuffer.data(), activeBuffer.size() * sizeof(msg_plane_info));
+            activeBuffer.clear();
+        }
+	// clean up
+
+	*/
+	
+	//create or open shared mem:
+	// shared_mem_name-> unique name of shared memory, O_CREATE  =create if it doesnt exist, O_RDWR = ALLOWS reading and writting
+	//0666 = read and write permissions for users subjet to processes permission mask
+	int shm_fd = shm_open(SHARED_MEMORY_NAME, O_CREAT | O_RDWR, 0666);
+
+	//if fails print error and exit
+	if (shm_fd == -1){
+		perror("shm_open");
 		return;
 	}
 
-	if (ftruncate(shm_fd, SHARED_MEMORY_SIZE) == -1) {
-		std::perror("ftruncate");
+	//creating shared mem does not automatially give it size, ftruncate() sets the size of the shared memory so it has enough space to store
+	//the sharedmemory structuture.
+	if(ftruncate(shm_fd, SHARED_MEMORY_SIZE) == -1){
+		perror("ftruncate");
 		close(shm_fd);
 		return;
 	}
 
-	void* mapping = mmap(nullptr, SHARED_MEMORY_SIZE, PROT_READ | PROT_WRITE,
-	                     MAP_SHARED, shm_fd, 0);
-	if (mapping == MAP_FAILED) {
-		std::perror("mmap");
-		close(shm_fd);
+	//mmap allows program to access shared memory if it was like a normal variable in the code
+	SharedMemory* shared_mem = static_cast<SharedMemory*>(
+			//null_ptr lets qnx choose mem address, shared_memory_size -> memory size, prot_read/write-> allows reading and writing
+			//MAP_SHARED makes it so changes are visible to other process mapping same memory
+			//shm_fd which shared memory object to mom, 0 means start the beginning of memory.
+			mmap(null_ptr, SHARED_MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd,0)
+			);
+
+	if (shared_mem == MAP_FAILED){
+		perror("mmap");
+		close(shmd_fd);
 		return;
 	}
-	auto* shared_mem = static_cast<SharedMemory*>(mapping);
 
 	{
+		//locks so that another thread cannot switch it whilst copying ac data mutex unlocks after }s
 		std::lock_guard<std::mutex> lock(bufferSwitchMutex);
-		auto& activeBuffer = getActiveBuffer();
-		const auto capacity = sizeof(shared_mem->plane_data) / sizeof(msg_plane_info);
-		const auto count = std::min(activeBuffer.size(), capacity);
+
+		//getActiveBuffer() gets the buffer containing the latest ac info
+		//timestamp stores the simulation time in shared memory and the & means we use the og buffer instead of making a copy.
+		std::vector<msg_plane_info>& activeBuffer = getActiveBuffer();
 
 		shared_mem->timestamp = tick_counter_ref;
-		shared_mem->count = static_cast<int>(count);
-		if (count != 0) {
-			std::memcpy(shared_mem->plane_data, activeBuffer.data(),
-			            count * sizeof(msg_plane_info));
+
+		//check if there is any aircraft
+		if(activeBuffer.empty()){
+			//if empty tells display no ac
+			shared_mem-> count = 0;
+			shared_mem-> is_empty.store(true);
+		}else{
+			//if buffer not empty-> store the number of ac in shared mem
+			shared_mem-> count = activeBuffer.size();
+
+			//this copies ac data into shared memory
+			std::memcpy(shared_mem-> plane_data, activateBuffer.data(), activeBuffer.size() * sizeof(msg_plane_info));
+			//plane_data where to copy, activateBuffer.data()-> what to copy, activeBuffer.size() * sizeof(msg_plane_info) -> how many bytes to copy
+
+			//tels disp data is available
+			shared_mem->is_empty.store(false);
+			//empty og bufer because done copying.
+			activeBuffer.clear();
 		}
-		shared_mem->is_empty.store(count == 0);
-		activeBuffer.clear();
 	}
 
-	if (munmap(mapping, SHARED_MEMORY_SIZE) == -1) {
-		std::perror("munmap");
+	//unmap shared mem since it has finished writing does not dleeted shared mem
+	if(mummap(shared_mem, SHARED_MEMORY_SIZE) == -1){
+		perror("munmap");
 	}
-	if (close(shm_fd) == -1) {
-		std::perror("close");
+
+	//close file description
+	if(close(shm_fd) == -1){
+		perror("close");
 	}
+
 }
 
 void Radar::clearSharedMemory() {
