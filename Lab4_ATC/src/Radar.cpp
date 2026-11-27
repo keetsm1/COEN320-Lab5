@@ -1,5 +1,9 @@
 #include "Radar.h"
 #include <sys/dispatch.h>
+#include <algorithm>
+#include <cstdio>
+
+#define SHARED_MEMORY_NAME "/gunkeet_tracy_radar_shm"
 
 
 Radar::Radar(uint64_t& tick_counter) : tick_counter_ref(tick_counter), activeBufferIndex(0), timer(1,0), stopThreads(false) {
@@ -187,43 +191,49 @@ void Radar::removePlaneFromAirspace(int planeID) {
 
 
 void Radar::writeToSharedMemory() {
-	// COEN320 Lab4_5 Task 2.1
-	/*
-	You need to implement the shared memory writing process here
-	Save SharedMemory structure to shared memory
-	Make sure to use mutex to protect the buffer switching process (e.g., bufferSwitchMutex)
-	To store aircraft data, use inactiveBuffer which is obtained from getActiveBuffer() method
-	Check the code snippet below for reference
-	at the end you need to unmap the shared memory and close the file descriptor
-	e.g., munmap(<SharedMemory object, shared_mem>, SHARED_MEMORY_SIZE) and close(shm_fd)
+	const int shm_fd = shm_open(SHARED_MEMORY_NAME, O_CREAT | O_RDWR, 0666);
+	if (shm_fd == -1) {
+		std::perror("shm_open");
+		return;
+	}
 
+	if (ftruncate(shm_fd, SHARED_MEMORY_SIZE) == -1) {
+		std::perror("ftruncate");
+		close(shm_fd);
+		return;
+	}
 
-	// Get the active buffer based on the current active index
-    std::vector<msg_plane_info>& activeBuffer = getActiveBuffer();
-    // Get the current timestamp
-    shared_mem->timestamp = tick_counter_ref;
+	void* mapping = mmap(nullptr, SHARED_MEMORY_SIZE, PROT_READ | PROT_WRITE,
+	                     MAP_SHARED, shm_fd, 0);
+	if (mapping == MAP_FAILED) {
+		std::perror("mmap");
+		close(shm_fd);
+		return;
+	}
+	auto* shared_mem = static_cast<SharedMemory*>(mapping);
 
-	// Check if activeBuffer is empty and set the flag accordingly
-	if (activeBuffer.empty()) {
-		std::vector<msg_plane_info>& inactiveBuffer = planesInAirspaceData[(activeBufferIndex + 1) % 2];
-		if (!inactiveBuffer.empty()){
-			shared_mem->is_empty.store(false);
-			shared_mem->count = inactiveBuffer.size();
-			std::memcpy(shared_mem->plane_data, inactiveBuffer.data(), inactiveBuffer.size() * sizeof(msg_plane_info));
-			inactiveBuffer.clear();
+	{
+		std::lock_guard<std::mutex> lock(bufferSwitchMutex);
+		auto& activeBuffer = getActiveBuffer();
+		const auto capacity = sizeof(shared_mem->plane_data) / sizeof(msg_plane_info);
+		const auto count = std::min(activeBuffer.size(), capacity);
+
+		shared_mem->timestamp = tick_counter_ref;
+		shared_mem->count = static_cast<int>(count);
+		if (count != 0) {
+			std::memcpy(shared_mem->plane_data, activeBuffer.data(),
+			            count * sizeof(msg_plane_info));
 		}
-		shared_mem->is_empty.store(true);
-		shared_mem->count = 0;  // No planes
-	} else {
-            shared_mem->is_empty.store(false);
-            shared_mem->count = activeBuffer.size();
-            std::memcpy(shared_mem->plane_data, activeBuffer.data(), activeBuffer.size() * sizeof(msg_plane_info));
-            activeBuffer.clear();
-        }
-	// clean up
+		shared_mem->is_empty.store(count == 0);
+		activeBuffer.clear();
+	}
 
-	*/
-	
+	if (munmap(mapping, SHARED_MEMORY_SIZE) == -1) {
+		std::perror("munmap");
+	}
+	if (close(shm_fd) == -1) {
+		std::perror("close");
+	}
 }
 
 void Radar::clearSharedMemory() {
