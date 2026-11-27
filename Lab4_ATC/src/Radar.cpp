@@ -228,7 +228,7 @@ void Radar::writeToSharedMemory() {
 	//create or open shared mem:
 	// shared_mem_name-> unique name of shared memory, O_CREATE  =create if it doesnt exist, O_RDWR = ALLOWS reading and writting
 	//0666 = read and write permissions for users subjet to processes permission mask
-	int shm_fd = shm_open(SHARED_MEMORY_NAME, O_CREAT | O_RDWR, 0666);
+	shm_fd = shm_open(SHARED_MEMORY_NAME, O_CREAT | O_RDWR, 0666);
 
 	//if fails print error and exit
 	if (shm_fd == -1){
@@ -241,20 +241,23 @@ void Radar::writeToSharedMemory() {
 	if(ftruncate(shm_fd, SHARED_MEMORY_SIZE) == -1){
 		perror("ftruncate");
 		close(shm_fd);
+		shm_fd =-1;
 		return;
 	}
 
 	//mmap allows program to access shared memory if it was like a normal variable in the code
-	SharedMemory* shared_mem = static_cast<SharedMemory*>(
+	sharedMemPtr = static_cast<SharedMemory*>(
 			//null_ptr lets qnx choose mem address, shared_memory_size -> memory size, prot_read/write-> allows reading and writing
 			//MAP_SHARED makes it so changes are visible to other process mapping same memory
-			//shm_fd which shared memory object to mom, 0 means start the beginning of memory.
+
 			mmap(nullptr, SHARED_MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd,0)
 			);
 
-	if (shared_mem == MAP_FAILED){
+	if (sharedMemPtr == MAP_FAILED){
 		perror("mmap");
 		close(shm_fd);
+		shm_fd = -1;
+		sharedMemPtr = nullptr;
 		return;
 	}
 
@@ -266,30 +269,30 @@ void Radar::writeToSharedMemory() {
 		//timestamp stores the simulation time in shared memory and the & means we use the og buffer instead of making a copy.
 		std::vector<msg_plane_info>& activeBuffer = getActiveBuffer();
 
-		shared_mem->timestamp = tick_counter_ref;
+		sharedMemPtr->timestamp = tick_counter_ref;
 
 		//check if there is any aircraft
 		if(activeBuffer.empty()){
 			//if empty tells display no ac
-			shared_mem-> count = 0;
-			shared_mem-> is_empty.store(true);
+			sharedMemPtr-> count = 0;
+			sharedMemPtr-> is_empty.store(true);
 		}else{
 			//if buffer not empty-> store the number of ac in shared mem
-			shared_mem-> count = activeBuffer.size();
+			sharedMemPtr-> count = activeBuffer.size();
 
 			//this copies ac data into shared memory
-			std::memcpy(shared_mem-> plane_data, activeBuffer.data(), activeBuffer.size() * sizeof(msg_plane_info));
+			std::memcpy(sharedMemPtr-> plane_data, activeBuffer.data(), activeBuffer.size() * sizeof(msg_plane_info));
 			//plane_data where to copy, activateBuffer.data()-> what to copy, activeBuffer.size() * sizeof(msg_plane_info) -> how many bytes to copy
 
 			//tels disp data is available
-			shared_mem->is_empty.store(false);
+			sharedMemPtr->is_empty.store(false);
 			//empty og bufer because done copying.
 			activeBuffer.clear();
 		}
 	}
 
 	//unmap shared mem since it has finished writing does not dleeted shared mem
-	if(munmap(shared_mem, SHARED_MEMORY_SIZE) == -1){
+	if(munmap(sharedMemPtr, SHARED_MEMORY_SIZE) == -1){
 		perror("munmap");
 	}
 
@@ -311,4 +314,51 @@ void Radar::clearSharedMemory() {
 	//sharedMemPtr->is_empty.store(true);  // Set the is_empty flag to false to not block reader
 	// Finally unmap the shared memory and close the file descriptor
 	
+	//basically we need to resetr everything inside shared memory to empty state. the constructor calls it when the radar starts
+	//destructorsd calls it when the radar shuts down.
+
+	//first open the shared mem:
+	shm_fd = shm_open(SHARED_MEMORY_NAME, O_CREAT | O_RDWR, 0666);
+
+
+    if (shm_fd == -1) {
+        perror("shm_open");
+        return;
+    }
+
+    // Set memory size
+    if (ftruncate(shm_fd, SHARED_MEMORY_SIZE) == -1) {
+        perror("ftruncate");
+        close(shm_fd);
+        return;
+    }
+
+    sharedMemPtr = static_cast<SharedMemory*>(
+        mmap(nullptr, SHARED_MEMORY_SIZE,
+             PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0)
+    );
+
+    if (sharedMemPtr == MAP_FAILED) {
+        perror("mmap");
+        close(shm_fd);
+        return;
+    }
+
+    //clear ac information:
+    //memset fills a region of memory with 0's.
+    std::memset(sharedMemPtr->plane_data, 0, sizeof(sharedMemPtr->plane_data));
+
+    sharedMemPtr->count = 0;
+    sharedMemPtr->timestamp=tick_counter_ref;
+    sharedMemPtr->is_empty.store(true);
+
+    //unmap shared memory
+    if(munmap(sharedMemPtr, SHARED_MEMORY_SIZE)== -1){
+    	perror("munmap");
+    }
+
+    // Close file descriptor
+    if (close(shm_fd) == -1) {
+        perror("close");
+    }
 }
