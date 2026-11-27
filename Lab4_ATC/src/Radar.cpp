@@ -249,12 +249,12 @@ void Radar::writeToSharedMemory() {
 			//null_ptr lets qnx choose mem address, shared_memory_size -> memory size, prot_read/write-> allows reading and writing
 			//MAP_SHARED makes it so changes are visible to other process mapping same memory
 			//shm_fd which shared memory object to mom, 0 means start the beginning of memory.
-			mmap(null_ptr, SHARED_MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd,0)
+			mmap(nullptr, SHARED_MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd,0)
 			);
 
 	if (shared_mem == MAP_FAILED){
 		perror("mmap");
-		close(shmd_fd);
+		close(shm_fd);
 		return;
 	}
 
@@ -278,7 +278,7 @@ void Radar::writeToSharedMemory() {
 			shared_mem-> count = activeBuffer.size();
 
 			//this copies ac data into shared memory
-			std::memcpy(shared_mem-> plane_data, activateBuffer.data(), activeBuffer.size() * sizeof(msg_plane_info));
+			std::memcpy(shared_mem-> plane_data, activeBuffer.data(), activeBuffer.size() * sizeof(msg_plane_info));
 			//plane_data where to copy, activateBuffer.data()-> what to copy, activeBuffer.size() * sizeof(msg_plane_info) -> how many bytes to copy
 
 			//tels disp data is available
@@ -289,7 +289,7 @@ void Radar::writeToSharedMemory() {
 	}
 
 	//unmap shared mem since it has finished writing does not dleeted shared mem
-	if(mummap(shared_mem, SHARED_MEMORY_SIZE) == -1){
+	if(munmap(shared_mem, SHARED_MEMORY_SIZE) == -1){
 		perror("munmap");
 	}
 
